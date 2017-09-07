@@ -4,8 +4,10 @@ import akka.actor.ActorSystem
 import akka.stream.{ActorMaterializer, ClosedShape, UniformFanInShape, UniformFanOutShape}
 import akka.stream.scaladsl._
 import org.scalatest.FunSuite
+import org.scalatest.time.Millis
 
-import scala.concurrent.Future
+import scala.concurrent.duration.Duration
+import scala.concurrent.{Await, Future}
 
 class GraphSuite extends FunSuite {
 
@@ -38,27 +40,32 @@ class GraphSuite extends FunSuite {
   }
 
   //remember: read GraphDSL.create implementation
-  test("two parallels streams"){
+  test("two parallel streams"){
     import scala.concurrent.ExecutionContext.Implicits.global
     implicit val actorSystem = ActorSystem("system")
     implicit val materializer = ActorMaterializer()
 
-
     val source = Source(1 to 3)
+
     val sink1: Sink[Int, Future[Int]] = Sink.fold(0)(_ + _)
     val sink2: Sink[Int, Future[Int]] = Sink.reduce((previous: Int, input: Int) => previous + input)
+    //function that combines both sink's materialized values
     def combineMat = (mat1: Future[Int], mat2: Future[Int]) => mat1.flatMap(m => mat2.map(_ + m))
+
     val flow: Flow[Int, Int, NotUsed] = Flow[Int].map((x:Int) => x * x)
-    val grph = RunnableGraph.fromGraph(GraphDSL.create(sink1, sink2)(combineMat){
+
+    val grph: RunnableGraph[Future[Int]] = RunnableGraph.fromGraph(GraphDSL.create(sink1, sink2)(combineMat){
       implicit builder => (sk1, sk2) =>
         import GraphDSL.Implicits._
         val broadcast = builder.add(Broadcast[Int](2))
         source ~> broadcast.in
+
         broadcast.out(0) ~> flow ~> sk1
         broadcast.out(1) ~> flow ~> sk2
+
         ClosedShape
     })
-    grph.run().map(println)
-    assert(true)
+
+    assert(Await.result(grph.run, Duration.Inf) == 28 )
   }
 }
