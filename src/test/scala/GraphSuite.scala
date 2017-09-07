@@ -8,10 +8,11 @@ import org.scalatest.FunSuite
 import scala.concurrent.Future
 
 class GraphSuite extends FunSuite {
-  implicit val actorSystem = ActorSystem("system")
-  implicit val materializer = ActorMaterializer()
 
   test("creating a Graph") {
+    implicit val actorSystem = ActorSystem("system")
+    implicit val materializer = ActorMaterializer()
+
     val graph: RunnableGraph[NotUsed] = RunnableGraph.fromGraph(GraphDSL.create() {
       implicit builder =>
         //GraphDSL.Implicits._ brings into scope ~> Operator, read as via, to o edge
@@ -37,29 +38,27 @@ class GraphSuite extends FunSuite {
   }
 
   //remember: read GraphDSL.create implementation
-  test("defineing two parallels streams"){
-    //sink that adds all streams elements
+  test("two parallels streams"){
+    import scala.concurrent.ExecutionContext.Implicits.global
+    implicit val actorSystem = ActorSystem("system")
+    implicit val materializer = ActorMaterializer()
+
+
+    val source = Source(1 to 3)
     val sink1: Sink[Int, Future[Int]] = Sink.fold(0)(_ + _)
-    val sink2: Sink[Int, Future[Int]] = Sink.fold(0)(_ * _)
-    //Source produces ten elements
-    val source = Source(1 to 10)
-    //Flows that applies the f function
-    def f = (x:Int) => x * x
-    val flow: Flow[Int, Int, NotUsed] = Flow[Int].map(f)
-    val grph = RunnableGraph.fromGraph(GraphDSL.create(sink1, sink2)((_, _)){
+    val sink2: Sink[Int, Future[Int]] = Sink.reduce((previous: Int, input: Int) => previous + input)
+    def combineMat = (mat1: Future[Int], mat2: Future[Int]) => mat1.flatMap(m => mat2.map(_ + m))
+    val flow: Flow[Int, Int, NotUsed] = Flow[Int].map((x:Int) => x * x)
+    val grph = RunnableGraph.fromGraph(GraphDSL.create(sink1, sink2)(combineMat){
       implicit builder => (sk1, sk2) =>
         import GraphDSL.Implicits._
         val broadcast = builder.add(Broadcast[Int](2))
-        Source.single(1) ~> broadcast.in
-
+        source ~> broadcast.in
         broadcast.out(0) ~> flow ~> sk1
         broadcast.out(1) ~> flow ~> sk2
         ClosedShape
     })
+    grph.run().map(println)
     assert(true)
   }
-
-
-
-
 }
