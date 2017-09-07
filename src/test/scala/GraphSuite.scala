@@ -5,6 +5,8 @@ import akka.stream.{ActorMaterializer, ClosedShape, UniformFanInShape, UniformFa
 import akka.stream.scaladsl._
 import org.scalatest.FunSuite
 
+import scala.concurrent.Future
+
 class GraphSuite extends FunSuite {
   implicit val actorSystem = ActorSystem("system")
   implicit val materializer = ActorMaterializer()
@@ -31,9 +33,33 @@ class GraphSuite extends FunSuite {
         broadcast ~> flow2AfterBcast ~> merge
         ClosedShape
     })
-    assertCompiles("graph.run")
-
+    assert(true)
   }
+
+  //remember: read GraphDSL.create implementation
+  test("defineing two parallels streams"){
+    //sink that adds all streams elements
+    val sink1: Sink[Int, Future[Int]] = Sink.fold(0)(_ + _)
+    val sink2: Sink[Int, Future[Int]] = Sink.fold(0)(_ * _)
+    //Source produces ten elements
+    val source = Source(1 to 10)
+    //Flows that applies the f function
+    def f = (x:Int) => x * x
+    val flow: Flow[Int, Int, NotUsed] = Flow[Int].map(f)
+    val grph = RunnableGraph.fromGraph(GraphDSL.create(sink1, sink2)((_, _)){
+      implicit builder => (sk1, sk2) =>
+        import GraphDSL.Implicits._
+        val broadcast = builder.add(Broadcast[Int](2))
+        Source.single(1) ~> broadcast.in
+
+        broadcast.out(0) ~> flow ~> sk1
+        broadcast.out(1) ~> flow ~> sk2
+        ClosedShape
+    })
+    assert(true)
+  }
+
+
 
 
 }
