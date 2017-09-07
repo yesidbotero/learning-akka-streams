@@ -1,7 +1,7 @@
 import org.scalatest.FunSuite
 import akka.{Done, NotUsed}
 import akka.actor.ActorSystem
-import akka.stream.{ActorMaterializer, ClosedShape, UniformFanInShape, UniformFanOutShape}
+import akka.stream._
 import akka.stream.scaladsl._
 import org.scalatest.FunSuite
 import org.scalatest.time.Millis
@@ -40,7 +40,7 @@ class GraphSuite extends FunSuite {
   }
 
   //remember: read GraphDSL.create implementation
-  test("two parallel streams"){
+  test("two parallel streams") {
     import scala.concurrent.ExecutionContext.Implicits.global
     implicit val actorSystem = ActorSystem("system")
     implicit val materializer = ActorMaterializer()
@@ -49,23 +49,62 @@ class GraphSuite extends FunSuite {
 
     val sink1: Sink[Int, Future[Int]] = Sink.fold(0)(_ + _)
     val sink2: Sink[Int, Future[Int]] = Sink.reduce((previous: Int, input: Int) => previous + input)
+
     //function that combines both sink's materialized values
     def combineMat = (mat1: Future[Int], mat2: Future[Int]) => mat1.flatMap(m => mat2.map(_ + m))
 
-    val flow: Flow[Int, Int, NotUsed] = Flow[Int].map((x:Int) => x * x)
+    val flow: Flow[Int, Int, NotUsed] = Flow[Int].map((x: Int) => x * x)
 
-    val grph: RunnableGraph[Future[Int]] = RunnableGraph.fromGraph(GraphDSL.create(sink1, sink2)(combineMat){
-      implicit builder => (sk1, sk2) =>
-        import GraphDSL.Implicits._
-        val broadcast = builder.add(Broadcast[Int](2))
-        source ~> broadcast.in
+    val grph: RunnableGraph[Future[Int]] = RunnableGraph.fromGraph(GraphDSL.create(sink1, sink2)(combineMat) {
+      implicit builder =>
+        (sk1, sk2) =>
+          import GraphDSL.Implicits._
+          val broadcast = builder.add(Broadcast[Int](2))
+          source ~> broadcast.in
 
-        broadcast.out(0) ~> flow ~> sk1
-        broadcast.out(1) ~> flow ~> sk2
+          broadcast.out(0) ~> flow ~> sk1
+          broadcast.out(1) ~> flow ~> sk2
 
-        ClosedShape
+          ClosedShape
     })
 
-    assert(Await.result(grph.run, Duration.Inf) == 28 )
+    assert(Await.result(grph.run, Duration.Inf) == 28)
+  }
+
+  test("Constructing and combining Partial Graphs") {
+    import scala.concurrent.ExecutionContext.Implicits.global
+    implicit val actorSystem = ActorSystem("system")
+    implicit val materializer = ActorMaterializer()
+
+    val list = List(List(1, 2), List(3, 4), List(5, 6))
+    val source: Source[List[Int], NotUsed] = Source(list)
+    val sink: Sink[List[Int], Future[List[Int]]] = Sink.fold(List(0))((listAcum, InputList: List[Int]) => for {
+      n1 <- listAcum
+      n2 <- InputList
+    } yield n1 + n2)
+
+    val flow: Flow[List[Int], List[Int], NotUsed] = Flow[List[Int]].map(x => x.map(_ + 1))
+
+    val g1: Graph[UniformFanOutShape[List[Int], List[Int]], NotUsed] = GraphDSL.create(flow) {
+      implicit builder =>
+        (f) =>
+          import GraphDSL.Implicits._
+
+          val bcost: UniformFanOutShape[List[Int], List[Int]] = builder.add(Broadcast[List[Int]](1))
+          f ~> bcost.in
+          UniformFanOutShape(f.in, bcost.out(0))
+    }
+
+    val g2: RunnableGraph[Future[List[Int]]] = RunnableGraph.fromGraph(GraphDSL.create(sink) {
+      implicit builder =>
+        (sinkShape) =>
+          import GraphDSL.Implicits._
+          val graphPartial: UniformFanOutShape[List[Int], List[Int]] = builder.add(g1)
+          val sourceShape: SourceShape[List[Int]] = builder.add(source)
+          sourceShape ~> graphPartial ~> sinkShape
+          ClosedShape
+    })
+
+    assert(Await.result(g2.run, Duration.Inf) == List(12, 13, 13, 14, 13, 14, 14, 15))
   }
 }
