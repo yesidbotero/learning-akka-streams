@@ -107,4 +107,38 @@ class GraphSuite extends FunSuite {
 
     assert(Await.result(g2.run, Duration.Inf) == List(12, 13, 13, 14, 13, 14, 14, 15))
   }
+
+  test("Combining Sources with simplified API"){
+    implicit val actorSystem = ActorSystem("system")
+    implicit val materializer = ActorMaterializer()
+
+    val source = Source(1 to 5)
+    val source2 = Source(20 to 25)
+    val sink: Sink[Int, Future[String]] = Sink.fold("")(_ + " " + _)
+
+
+    val mergedSources: Source[Int, NotUsed] = Source.combine(source, source2)(Merge(_))
+    //Elements should produce: 1 20 2 21 3 22 4 23 5 24 25
+    assert(Await.result(mergedSources.runWith(sink), Duration.Inf) == " 1 20 2 21 3 22 4 23 5 24 25")
+  }
+
+  test("Combinig Sinks with simplified API using actors"){
+    implicit val actorSystem = ActorSystem("system")
+    implicit val materializer = ActorMaterializer()
+    import actors._
+    import actors.basicActor.Message
+
+    val actorRef = actorSystem.actorOf(basicActor.props())
+
+    val sink1 = Sink.actorRef(actorRef, Message("done"))
+
+    val sink2 = Sink.foreach[Message](x => println("printing in local proccess: " +  x.msg) )
+    //Message object is broadcasted
+    val sink = Sink.combine(sink1, sink2)(Broadcast[Message](_))
+
+    Source(List(Message("Hi!"), Message("konnichiwa"), Message("Ni hoa"))).runWith(sink)
+    //test with side affects
+    assert(true)
+  }
+
 }
