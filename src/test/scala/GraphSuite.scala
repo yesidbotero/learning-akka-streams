@@ -170,13 +170,14 @@ class GraphSuite extends FunSuite {
         (sk1, sk2) => {
           import GraphDSL.Implicits._
 
-          val s1 = builder.add(Source(list))
+          val s1: SourceShape[Int] = builder.add(Source(list))
           val s2 = builder.add(Source(list.reverse))
+
           val bidi: BidiShape[Int, Try[Int], Int, Try[Int]] = builder.add(BidiFlow.fromFunctions(mult, div))
 
           s1 ~> bidi.in1
-          bidi.out1 ~> sk1
-          bidi.in2 <~ s2
+                bidi.out1 ~> sk1
+                bidi.in2 <~ s2
           sk2 <~ bidi.out2
 
           ClosedShape
@@ -186,6 +187,24 @@ class GraphSuite extends FunSuite {
     val result: (Future[List[Try[Int]]], Future[List[Try[Int]]]) = grp.run()
 
     assert(Await.result(result._1, Duration.Inf).map(x => x.get) == List(30, 20, 10, 0))
-    assert(Await.result(result._2, Duration.Inf).map(x => x.get) == List(-1, 10, 5, 3))
+    assert(Await.result(result._2, Duration.Inf).map(x => x.get) == List(-1, 10, 1, 3))
   }
+
+  test("defining a composed flow from a disconnected Sink and Source "){
+    //verbously
+    implicit val actorSystem = ActorSystem("system")
+    implicit val materializer = ActorMaterializer()
+
+      val grp = GraphDSL.create() {
+        implicit builder =>
+          val sink: SinkShape[Int] = builder.add(Sink.ignore)
+          val source = builder.add(Source(1 to 5))
+          FlowShape(sink.in, source.out)
+      }
+
+    Source(1 to 10).via(grp).runWith(Sink.foreach(println))
+    assert(true)
+  }
+
+
 }
