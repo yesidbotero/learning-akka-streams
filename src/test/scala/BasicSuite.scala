@@ -1,8 +1,9 @@
-import akka.{Done, NotUsed}
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl._
+import akka.{Done, NotUsed}
 import org.scalatest.FunSuite
+
 import scala.concurrent.ExecutionContext.Implicits.global
 import scala.concurrent.duration.Duration
 import scala.concurrent.{Await, Future}
@@ -47,7 +48,7 @@ class BasicSuite extends FunSuite {
 
   test("working with lists") {
     val source: Source[List[Int], NotUsed] = Source.fromFuture(Future(List(1, 2, 3, 4, 5)))
-    val flow: Flow[List[Int], List[Int], NotUsed] = Flow[List[Int]].map(x => x.map(y => y + 1 ))
+    val flow: Flow[List[Int], List[Int], NotUsed] = Flow[List[Int]].map(x => x.map(y => y + 1))
     val sink = Sink.foreach(println)
     val graph = source via flow to sink
     assertCompiles("graph.run")
